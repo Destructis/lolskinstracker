@@ -241,7 +241,7 @@ const normalize = (s: string): string =>
   s
     .toLowerCase()
     .normalize("NFD")
-    // @ts-expect-error: Unicode property escapes supported in modern engines
+    
     .replace(/\p{Diacritic}/gu, "")
     .replace(/['`.\-\s]/g, "");
 

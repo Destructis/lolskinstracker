@@ -1,5 +1,5 @@
 // file: src/LolSkinsTracker.tsx
-import React, { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 
 /**
  * React TS component for tracking LoL skins per champion.
@@ -32,10 +32,7 @@ type DDragonChampionIndex = {
   type: string;
   format: string;
   version: string;
-  data: Record<
-    string,
-    { id: string; key: string; name: string; title: string }
-  >;
+  data: Record<string, { id: string; key: string; name: string; title: string }>;
 };
 
 type DDragonChampionDetail = {
@@ -235,8 +232,7 @@ const CHAMPION_NAMES: readonly string[] = [
 
 const uid = (): string => {
   // Stable ids help persistence; fallback avoids crypto requirement in older browsers.
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto)
-    return crypto.randomUUID();
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `id_${Math.random().toString(36).slice(2)}_${Date.now()}`;
 };
 
@@ -245,6 +241,7 @@ const normalize = (s: string): string =>
   s
     .toLowerCase()
     .normalize("NFD")
+    // @ts-expect-error: Unicode property escapes supported in modern engines
     .replace(/\p{Diacritic}/gu, "")
     .replace(/['`.\-\s]/g, "");
 
@@ -271,11 +268,7 @@ function loadInitialChampions(): Champion[] {
           id: existing.id || nameToId(name),
           name: existing.name,
           skins: Array.isArray(existing.skins)
-            ? existing.skins.map((s) => ({
-                id: s.id || uid(),
-                name: s.name,
-                checked: !!s.checked,
-              }))
+            ? existing.skins.map((s) => ({ id: s.id || uid(), name: s.name, checked: !!s.checked }))
             : [],
         } satisfies Champion;
       }
@@ -292,11 +285,7 @@ function loadInitialChampions(): Champion[] {
     return merged;
   } catch {
     // Corrupt storage → start fresh.
-    return CHAMPION_NAMES.map((name) => ({
-      id: nameToId(name),
-      name,
-      skins: [],
-    }));
+    return CHAMPION_NAMES.map((name) => ({ id: nameToId(name), name, skins: [] }));
   }
 }
 
@@ -317,9 +306,7 @@ function saveChampions(champions: Champion[]): void {
 
 async function fetchDdragonLatestVersion(): Promise<string | null> {
   try {
-    const res = await fetch(
-      "https://ddragon.leagueoflegends.com/api/versions.json"
-    );
+    const res = await fetch("https://ddragon.leagueoflegends.com/api/versions.json");
     const list = (await res.json()) as string[];
     return Array.isArray(list) && list.length > 0 ? list[0] : null; // newest first per spec
   } catch {
@@ -327,14 +314,9 @@ async function fetchDdragonLatestVersion(): Promise<string | null> {
   }
 }
 
-async function fetchChampionIndex(
-  version: string,
-  locale: string
-): Promise<DDragonChampionIndex | null> {
+async function fetchChampionIndex(version: string, locale: string): Promise<DDragonChampionIndex | null> {
   try {
-    const res = await fetch(
-      `https://ddragon.leagueoflegends.com/cdn/${version}/data/${locale}/champion.json`
-    );
+    const res = await fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/${locale}/champion.json`);
     if (!res.ok) return null;
     return (await res.json()) as DDragonChampionIndex;
   } catch {
@@ -352,15 +334,9 @@ function buildKeyMap(idx: DDragonChampionIndex): Map<string, string> {
   return m;
 }
 
-async function fetchChampionSkins(
-  version: string,
-  locale: string,
-  key: string
-): Promise<string[]> {
+async function fetchChampionSkins(version: string, locale: string, key: string): Promise<string[]> {
   try {
-    const res = await fetch(
-      `https://ddragon.leagueoflegends.com/cdn/${version}/data/${locale}/champion/${key}.json`
-    );
+    const res = await fetch(`https://ddragon.leagueoflegends.com/cdn/${version}/data/${locale}/champion/${key}.json`);
     if (!res.ok) return [];
     const data = (await res.json()) as DDragonChampionDetail;
     const champ = data.data[key];
@@ -375,9 +351,7 @@ async function fetchChampionSkins(
 // ----------------------------- Main Component -----------------------------
 
 export default function LolSkinsTracker(): JSX.Element {
-  const [champions, setChampions] = useState<Champion[]>(() =>
-    loadInitialChampions()
-  );
+  const [champions, setChampions] = useState<Champion[]>(() => loadInitialChampions());
   const [query, setQuery] = useState("");
   const [showMode, setShowMode] = useState<"all" | "with" | "without">("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -417,17 +391,9 @@ export default function LolSkinsTracker(): JSX.Element {
 
   const totals = useMemo(() => {
     const champsWithChecked = champions.filter(hasChecked).length;
-    const skinChecked = champions.reduce(
-      (acc, c) => acc + c.skins.filter((s) => s.checked).length,
-      0
-    );
+    const skinChecked = champions.reduce((acc, c) => acc + c.skins.filter((s) => s.checked).length, 0);
     const skinTotal = champions.reduce((acc, c) => acc + c.skins.length, 0);
-    return {
-      champsWithChecked,
-      champsTotal: champions.length,
-      skinChecked,
-      skinTotal,
-    };
+    return { champsWithChecked, champsTotal: champions.length, skinChecked, skinTotal };
   }, [champions]);
 
   // ----------------------------- Mutations -----------------------------
@@ -467,12 +433,7 @@ export default function LolSkinsTracker(): JSX.Element {
   };
 
   const clearAllChecks = () => {
-    setChampions((prev) =>
-      prev.map((c) => ({
-        ...c,
-        skins: c.skins.map((s) => ({ ...s, checked: false })),
-      }))
-    );
+    setChampions((prev) => prev.map((c) => ({ ...c, skins: c.skins.map((s) => ({ ...s, checked: false })) })));
   };
 
   const expandAll = () => setExpanded(new Set(filtered.map((c) => c.id)));
@@ -481,9 +442,7 @@ export default function LolSkinsTracker(): JSX.Element {
   // ----------------------------- Import / Export -----------------------------
 
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify(champions, null, 2)], {
-      type: "application/json",
-    });
+    const blob = new Blob([JSON.stringify(champions, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -506,19 +465,13 @@ export default function LolSkinsTracker(): JSX.Element {
             id: c.id,
             name: c.name,
             skins: Array.isArray(incoming.skins)
-              ? incoming.skins.map((s) => ({
-                  id: s.id || uid(),
-                  name: s.name,
-                  checked: !!s.checked,
-                }))
+              ? incoming.skins.map((s) => ({ id: s.id || uid(), name: s.name, checked: !!s.checked }))
               : c.skins,
           } satisfies Champion;
         })
       );
     } catch (e) {
-      alert(
-        "Échec de l'import: " + (e instanceof Error ? e.message : "inconnu")
-      );
+      alert("Échec de l\'import: " + (e instanceof Error ? e.message : "inconnu"));
     }
   };
 
@@ -526,9 +479,7 @@ export default function LolSkinsTracker(): JSX.Element {
 
   /** Merge fetched skin names with existing champion skins (keep checked states). */
   const mergeSkins = (c: Champion, fetchedNames: string[]): Champion => {
-    const existingByName = new Map(
-      c.skins.map((s) => [normalize(s.name), s] as const)
-    );
+    const existingByName = new Map(c.skins.map((s) => [normalize(s.name), s] as const));
     const merged: Skin[] = [];
     for (const name of fetchedNames) {
       const key = normalize(name);
@@ -538,10 +489,7 @@ export default function LolSkinsTracker(): JSX.Element {
     }
     // Keep any custom skins that were not in fetched list
     for (const s of c.skins) {
-      if (
-        !existingByName.has(normalize(s.name)) &&
-        !fetchedNames.some((n) => normalize(n) === normalize(s.name))
-      ) {
+      if (!existingByName.has(normalize(s.name)) && !fetchedNames.some((n) => normalize(n) === normalize(s.name))) {
         merged.push(s);
       }
     }
@@ -577,31 +525,20 @@ export default function LolSkinsTracker(): JSX.Element {
       <div className="mx-auto max-w-5xl px-4 py-6">
         <header className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight">
-              League of Legends — Suivi des skins
-            </h1>
+            <h1 className="text-3xl font-semibold tracking-tight">League of Legends — Suivi des skins</h1>
             <p className="mt-1 text-sm text-gray-600">
-              {totals.champsWithChecked}/{totals.champsTotal} champions avec au
-              moins un skin coché · {totals.skinChecked}/{totals.skinTotal}{" "}
-              skins cochés
+              {totals.champsWithChecked}/{totals.champsTotal} champions avec au moins un skin coché · {totals.skinChecked}/
+              {totals.skinTotal} skins cochés
             </p>
             <p className="mt-1 text-[11px] text-gray-500">
-              Données des skins via Data Dragon{" "}
-              {ddVersion ? `(v${ddVersion})` : "(chargement…)"}. Ce projet n'est
-              pas affilié à Riot Games.
+              Données des skins via Data Dragon {ddVersion ? `(v${ddVersion})` : "(chargement…)"}. Ce projet n'est pas affilié à Riot Games.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={clearAllChecks}
-              className="rounded-xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100"
-            >
+            <button onClick={clearAllChecks} className="rounded-xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100">
               Réinitialiser les coches
             </button>
-            <button
-              onClick={exportJson}
-              className="rounded-xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100"
-            >
+            <button onClick={exportJson} className="rounded-xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100">
               Exporter JSON
             </button>
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100">
@@ -649,18 +586,8 @@ export default function LolSkinsTracker(): JSX.Element {
             <option value="without">Afficher: Sans skin coché</option>
           </select>
           <div className="flex gap-2">
-            <button
-              onClick={expandAll}
-              className="rounded-2xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100"
-            >
-              Tout déployer
-            </button>
-            <button
-              onClick={collapseAll}
-              className="rounded-2xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100"
-            >
-              Tout replier
-            </button>
+            <button onClick={expandAll} className="rounded-2xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100">Tout déployer</button>
+            <button onClick={collapseAll} className="rounded-2xl border px-3 py-2 text-sm shadow-sm hover:bg-gray-100">Tout replier</button>
           </div>
         </div>
 
@@ -679,9 +606,7 @@ export default function LolSkinsTracker(): JSX.Element {
                 })
               }
               onToggleAll={(checked) => toggleAllSkins(c.id, checked)}
-              onToggleSkin={(skinId, checked) =>
-                toggleSkin(c.id, skinId, checked)
-              }
+              onToggleSkin={(skinId, checked) => toggleSkin(c.id, skinId, checked)}
               onAddSkin={(name) => addSkin(c.id, name)}
               onRemoveSkin={(skinId) => removeSkin(c.id, skinId)}
               onPrefill={() => prefillChampion(c)}
@@ -691,9 +616,7 @@ export default function LolSkinsTracker(): JSX.Element {
         </ul>
 
         {filtered.length === 0 && (
-          <p className="mt-8 text-center text-sm text-gray-500">
-            Aucun champion ne correspond à votre filtre.
-          </p>
+          <p className="mt-8 text-center text-sm text-gray-500">Aucun champion ne correspond à votre filtre.</p>
         )}
       </div>
     </div>
@@ -714,17 +637,7 @@ type ChampionRowProps = {
   ddragonReady: boolean;
 };
 
-function ChampionRow({
-  champion,
-  expanded,
-  setExpanded,
-  onToggleAll,
-  onToggleSkin,
-  onAddSkin,
-  onRemoveSkin,
-  onPrefill,
-  ddragonReady,
-}: ChampionRowProps) {
+function ChampionRow({ champion, expanded, setExpanded, onToggleAll, onToggleSkin, onAddSkin, onRemoveSkin, onPrefill, ddragonReady }: ChampionRowProps) {
   const total = champion.skins.length;
   const checkedCount = champion.skins.filter((s) => s.checked).length;
   const allChecked = total > 0 && checkedCount === total;
@@ -732,8 +645,7 @@ function ChampionRow({
 
   const masterRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (masterRef.current)
-      masterRef.current.indeterminate = someChecked && !allChecked;
+    if (masterRef.current) masterRef.current.indeterminate = someChecked && !allChecked;
   }, [someChecked, allChecked]);
 
   const [newSkin, setNewSkin] = useState("");
@@ -749,11 +661,7 @@ function ChampionRow({
           onChange={(e) => onToggleAll(e.target.checked)}
           disabled={total === 0}
           aria-label={`Tout cocher pour ${champion.name}`}
-          title={
-            total === 0
-              ? "Ajoutez des skins pour activer"
-              : "Cocher/Décocher tous les skins"
-          }
+          title={total === 0 ? "Ajoutez des skins pour activer" : "Cocher/Décocher tous les skins"}
         />
         <button
           onClick={() => setExpanded(!expanded)}
@@ -763,13 +671,9 @@ function ChampionRow({
         >
           <span className="font-medium">{champion.name}</span>
           <span className="inline-flex items-center gap-2 text-xs text-gray-600">
-            <span className="rounded-full border px-2 py-0.5">
-              {checkedCount}/{total}
-            </span>
+            <span className="rounded-full border px-2 py-0.5">{checkedCount}/{total}</span>
             <svg
-              className={`h-4 w-4 transition-transform ${
-                expanded ? "rotate-180" : "rotate-0"
-              }`}
+              className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : "rotate-0"}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -821,17 +725,11 @@ function ChampionRow({
           </div>
 
           {champion.skins.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              Aucun skin pour l'instant. Ajoutez-en ci-dessus ou utilisez
-              "Préremplir".
-            </p>
+            <p className="text-sm text-gray-500">Aucun skin pour l'instant. Ajoutez-en ci-dessus ou utilisez "Préremplir".</p>
           ) : (
             <ul className="space-y-2">
               {champion.skins.map((skin) => (
-                <li
-                  key={skin.id}
-                  className="flex items-center justify-between rounded-xl border px-3 py-2"
-                >
+                <li key={skin.id} className="flex items-center justify-between rounded-xl border px-3 py-2">
                   <label className="flex items-center gap-2">
                     <input
                       type="checkbox"

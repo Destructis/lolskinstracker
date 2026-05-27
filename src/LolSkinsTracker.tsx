@@ -22,7 +22,7 @@ type DDragonChampionDetail = {
     {
       id: string;
       name: string;
-      skins: { id: string; num: number; name: string }[];
+      skins: { id: string; num: number; name: string; chromas: boolean }[];
     }
   >;
 };
@@ -218,6 +218,29 @@ const normalize = (value: string): string =>
 
 const championId = (name: string): string => `champ_${normalize(name)}`;
 
+const isChromaName = (value: string): boolean =>
+  normalize(value).includes("chroma");
+
+const baseSkinName = (name: string): string => name.replace(/\s*\([^)]*\)\s*$/, "").trim();
+
+function groupSkins(skins: Skin[]) {
+  const map = new Map<string, Skin[]>();
+  for (const s of skins) {
+    const base = normalize(baseSkinName(s.name));
+    const arr = map.get(base);
+    if (arr) arr.push(s);
+    else map.set(base, [s]);
+  }
+
+  const groups: { base: string; display: string; variants: Skin[] }[] = [];
+  for (const [base, variants] of map.entries()) {
+    // choose display name: prefer variant without parentheses
+    const displayVariant = variants.find((v) => !/\([^)]*\)/.test(v.name)) || variants[0];
+    groups.push({ base, display: baseSkinName(displayVariant.name), variants });
+  }
+  return groups;
+}
+
 async function fetchDdragonLatestVersion(): Promise<string | null> {
   try {
     const response = await fetch(
@@ -283,8 +306,24 @@ async function fetchChampionSkins(
     }
 
     return champion.skins
-      .filter((skin) => skin.num > 0)
-      .map((skin) => skin.name.trim());
+      .filter(
+        (skin) => skin.num > 0 && !skin.chromas && !isChromaName(skin.name),
+      )
+      .map((skin) => skin.name.trim())
+      .reduce((acc: string[], name) => {
+        const base = baseSkinName(name);
+        const existingIndex = acc.findIndex((n) => baseSkinName(n) === base);
+        if (existingIndex === -1) acc.push(name);
+        else {
+          // prefer the non-parenthesized variant if available
+          if (!/\([^)]*\)/.test(acc[existingIndex]) && /\([^)]*\)/.test(name)) {
+            // keep existing (already non-parenthesized)
+          } else if (/\([^)]*\)/.test(acc[existingIndex]) && !/\([^)]*\)/.test(name)) {
+            acc[existingIndex] = name;
+          }
+        }
+        return acc;
+      }, [] as string[]);
   } catch {
     return [];
   }
@@ -325,8 +364,20 @@ function sanitizeChampions(input: unknown): Champion[] {
               checked: Boolean(typedSkin.checked),
             };
           })
-          .filter((skin) => skin.name.trim().length > 0)
+          .filter(
+            (skin) => skin.name.trim().length > 0 && !isChromaName(skin.name),
+          )
       : [];
+
+    // dedupe skins by base name (remove chroma variants)
+    const dedupedSkins: Skin[] = [];
+    const seenBases = new Set<string>();
+    for (const s of skins) {
+      const base = normalize(baseSkinName(s.name));
+      if (seenBases.has(base)) continue;
+      seenBases.add(base);
+      dedupedSkins.push(s);
+    }
 
     byName.set(candidate.name, {
       id:
@@ -334,7 +385,7 @@ function sanitizeChampions(input: unknown): Champion[] {
           ? candidate.id
           : championId(candidate.name),
       name: candidate.name,
-      skins,
+      skins: dedupedSkins,
     });
   }
 
@@ -411,19 +462,27 @@ function mergeImportedChampions(
       id: champion.id,
       name: champion.name,
       skins: Array.isArray(incoming.skins)
-        ? incoming.skins
-            .filter(
-              (skin) =>
-                skin &&
-                typeof skin.name === "string" &&
-                skin.name.trim().length > 0,
-            )
-            .map((skin) => ({
-              id:
-                typeof skin.id === "string" && skin.id.trim() ? skin.id : uid(),
-              name: skin.name,
-              checked: Boolean(skin.checked),
-            }))
+        ? (() => {
+            const tmp: Skin[] = incoming.skins
+              .filter(
+                (skin) => skin && typeof skin.name === "string" && skin.name.trim().length > 0,
+              )
+              .map((skin) => ({
+                id: typeof skin.id === "string" && skin.id.trim() ? skin.id : uid(),
+                name: skin.name,
+                checked: Boolean(skin.checked),
+              }));
+
+            const dedup: Skin[] = [];
+            const seen = new Set<string>();
+            for (const s of tmp) {
+              const base = normalize(baseSkinName(s.name));
+              if (seen.has(base)) continue;
+              seen.add(base);
+              dedup.push(s);
+            }
+            return dedup;
+          })()
         : champion.skins,
     };
   });
@@ -494,15 +553,15 @@ export default function LolSkinsTracker() {
 
   const totals = useMemo(() => {
     const championsWithCheckedSkin = champions.filter(hasCheckedSkin).length;
-    const totalSkins = champions.reduce(
-      (sum, champion) => sum + champion.skins.length,
-      0,
-    );
-    const checkedSkins = champions.reduce(
-      (sum, champion) =>
-        sum + champion.skins.filter((skin) => skin.checked).length,
-      0,
-    );
+    const totalSkins = champions.reduce((sum, champion) => {
+      const bases = new Set(champion.skins.map((s) => normalize(baseSkinName(s.name))));
+      return sum + bases.size;
+    }, 0);
+
+    const checkedSkins = champions.reduce((sum, champion) => {
+      const groups = groupSkins(champion.skins);
+      return sum + groups.filter((g) => g.variants.some((v) => v.checked)).length;
+    }, 0);
 
     return {
       championsWithCheckedSkin,
@@ -545,13 +604,18 @@ export default function LolSkinsTracker() {
       return;
     }
 
-    updateChampion(championId, (champion) => ({
-      ...champion,
-      skins: [
-        ...champion.skins,
-        { id: uid(), name: trimmedName, checked: false },
-      ],
-    }));
+    updateChampion(championId, (champion) => {
+      const base = normalize(baseSkinName(trimmedName));
+      if (champion.skins.some((s) => normalize(baseSkinName(s.name)) === base)) {
+        // already have this base skin (chroma variant counted as same skin)
+        return champion;
+      }
+
+      return {
+        ...champion,
+        skins: [...champion.skins, { id: uid(), name: trimmedName, checked: false }],
+      };
+    });
   };
 
   const removeSkin = (championId: string, skinId: string) => {
@@ -576,12 +640,12 @@ export default function LolSkinsTracker() {
 
   const mergeSkins = (champion: Champion, fetchedNames: string[]): Champion => {
     const existingByName = new Map(
-      champion.skins.map((skin) => [normalize(skin.name), skin] as const),
+      champion.skins.map((skin) => [normalize(baseSkinName(skin.name)), skin] as const),
     );
     const merged: Skin[] = [];
 
     for (const name of fetchedNames) {
-      const existing = existingByName.get(normalize(name));
+      const existing = existingByName.get(normalize(baseSkinName(name)));
       merged.push(existing ?? { id: uid(), name, checked: false });
     }
 
@@ -818,6 +882,7 @@ function ChampionRow({
 }: ChampionRowProps) {
   const [newSkin, setNewSkin] = useState("");
   const masterRef = useRef<HTMLInputElement>(null);
+  const [openBases, setOpenBases] = useState<Set<string>>(new Set());
 
   const totalSkins = champion.skins.length;
   const checkedSkins = champion.skins.filter((skin) => skin.checked).length;
@@ -897,34 +962,81 @@ function ChampionRow({
           </div>
 
           {champion.skins.length === 0 ? (
-            <p className="empty-inline">
-              Aucun skin pour l'instant. Ajoutez-en ci-dessus.
-            </p>
+            <p className="empty-inline">Aucun skin pour l'instant. Ajoutez-en ci-dessus.</p>
           ) : (
-            <ul className="skin-list">
-              {champion.skins.map((skin) => (
-                <li key={skin.id} className="skin-item">
-                  <label className="skin-item__label">
-                    <input
-                      type="checkbox"
-                      checked={skin.checked}
-                      onChange={(event) =>
-                        onToggleSkin(skin.id, event.target.checked)
-                      }
-                    />
-                    <span>{skin.name}</span>
-                  </label>
+            (() => {
+              const groups = groupSkins(champion.skins);
+              return (
+                <ul className="skin-list">
+                  {groups.map((g) => (
+                    <li key={g.base} className="skin-item">
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <input
+                          type="checkbox"
+                          checked={g.variants.some((v) => v.checked)}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            for (const v of g.variants) onToggleSkin(v.id, checked);
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = new Set(openBases);
+                            if (next.has(g.base)) next.delete(g.base);
+                            else next.add(g.base);
+                            setOpenBases(next);
+                          }}
+                          className="champion-row__toggle"
+                          style={{ background: "transparent", border: 0, padding: 0 }}
+                        >
+                          <span>{g.display}</span>
+                        </button>
+                      </div>
 
-                  <button
-                    type="button"
-                    onClick={() => onRemoveSkin(skin.id)}
-                    className="delete-button"
-                  >
-                    Supprimer
-                  </button>
-                </li>
-              ))}
-            </ul>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <button
+                          type="button"
+                          onClick={() => onPrefill()}
+                          className="action-button"
+                          disabled={!ddragonReady}
+                          title="Préremplir"
+                          style={{ padding: "6px 8px" }}
+                        >
+                          ↻
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            for (const v of g.variants) onRemoveSkin(v.id);
+                          }}
+                          className="delete-button"
+                          style={{ padding: "6px 8px" }}
+                        >
+                          Supprimer
+                        </button>
+                      </div>
+
+                      {openBases.has(g.base) ? (
+                        <ul style={{ marginTop: 8 }}>
+                          {g.variants.map((v) => (
+                            <li key={v.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <input type="checkbox" checked={v.checked} onChange={(e) => onToggleSkin(v.id, e.target.checked)} />
+                                <span title={v.name}>{v.name}</span>
+                              </label>
+                              <button type="button" className="delete-button" onClick={() => onRemoveSkin(v.id)} style={{ marginLeft: 12 }}>
+                                Supprimer variante
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              );
+            })()
           )}
         </div>
       ) : null}

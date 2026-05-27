@@ -12,7 +12,23 @@ type Champion = {
   skins: Skin[];
 };
 
+type DDragonChampionIndex = {
+  data: Record<string, { id: string; name: string }>;
+};
+
+type DDragonChampionDetail = {
+  data: Record<
+    string,
+    {
+      id: string;
+      name: string;
+      skins: { id: string; num: number; name: string }[];
+    }
+  >;
+};
+
 const STORAGE_KEY = "lol-skins-tracker:champions";
+const DDRAGON_LOCALE = "fr_FR";
 
 const CHAMPION_NAMES = [
   "Aatrox",
@@ -202,6 +218,78 @@ const normalize = (value: string): string =>
 
 const championId = (name: string): string => `champ_${normalize(name)}`;
 
+async function fetchDdragonLatestVersion(): Promise<string | null> {
+  try {
+    const response = await fetch(
+      "https://ddragon.leagueoflegends.com/api/versions.json",
+    );
+    if (!response.ok) {
+      return null;
+    }
+
+    const versions = (await response.json()) as string[];
+    return Array.isArray(versions) && versions.length > 0 ? versions[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchChampionIndex(
+  version: string,
+  locale: string,
+): Promise<DDragonChampionIndex | null> {
+  try {
+    const response = await fetch(
+      `https://ddragon.leagueoflegends.com/cdn/${version}/data/${locale}/champion.json`,
+    );
+    if (!response.ok) {
+      return null;
+    }
+
+    return (await response.json()) as DDragonChampionIndex;
+  } catch {
+    return null;
+  }
+}
+
+function buildKeyMap(index: DDragonChampionIndex): Map<string, string> {
+  const map = new Map<string, string>();
+
+  for (const [key, value] of Object.entries(index.data)) {
+    map.set(normalize(value.name), key);
+    map.set(normalize(value.id), key);
+  }
+
+  return map;
+}
+
+async function fetchChampionSkins(
+  version: string,
+  locale: string,
+  key: string,
+): Promise<string[]> {
+  try {
+    const response = await fetch(
+      `https://ddragon.leagueoflegends.com/cdn/${version}/data/${locale}/champion/${key}.json`,
+    );
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = (await response.json()) as DDragonChampionDetail;
+    const champion = data.data[key];
+    if (!champion) {
+      return [];
+    }
+
+    return champion.skins
+      .filter((skin) => skin.num > 0)
+      .map((skin) => skin.name.trim());
+  } catch {
+    return [];
+  }
+}
+
 function createDefaultChampions(): Champion[] {
   return CHAMPION_NAMES.map((name) => ({
     id: championId(name),
@@ -346,10 +434,35 @@ export default function LolSkinsTracker() {
   const [query, setQuery] = useState("");
   const [showMode, setShowMode] = useState<"all" | "with" | "without">("all");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [ddVersion, setDdVersion] = useState<string | null>(null);
+  const [ddKeyMap, setDdKeyMap] = useState<Map<string, string> | null>(null);
+  const [prefilling, setPrefilling] = useState(false);
 
   useEffect(() => {
     saveChampions(champions);
   }, [champions]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      const version = await fetchDdragonLatestVersion();
+      if (!version || cancelled) {
+        return;
+      }
+
+      setDdVersion(version);
+
+      const index = await fetchChampionIndex(version, DDRAGON_LOCALE);
+      if (index && !cancelled) {
+        setDdKeyMap(buildKeyMap(index));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const normalizedQuery = useMemo(() => normalize(query), [query]);
 
@@ -461,6 +574,65 @@ export default function LolSkinsTracker() {
     setExpanded(new Set(filteredChampions.map((champion) => champion.id)));
   const collapseAll = () => setExpanded(new Set());
 
+  const mergeSkins = (champion: Champion, fetchedNames: string[]): Champion => {
+    const existingByName = new Map(
+      champion.skins.map((skin) => [normalize(skin.name), skin] as const),
+    );
+    const merged: Skin[] = [];
+
+    for (const name of fetchedNames) {
+      const existing = existingByName.get(normalize(name));
+      merged.push(existing ?? { id: uid(), name, checked: false });
+    }
+
+    for (const skin of champion.skins) {
+      if (
+        !fetchedNames.some((name) => normalize(name) === normalize(skin.name))
+      ) {
+        merged.push(skin);
+      }
+    }
+
+    return { ...champion, skins: merged };
+  };
+
+  const prefillChampion = async (champion: Champion) => {
+    if (!ddVersion || !ddKeyMap) {
+      return;
+    }
+
+    const key = ddKeyMap.get(normalize(champion.name));
+    if (!key) {
+      return;
+    }
+
+    const fetchedNames = await fetchChampionSkins(
+      ddVersion,
+      DDRAGON_LOCALE,
+      key,
+    );
+    if (fetchedNames.length === 0) {
+      return;
+    }
+
+    updateChampion(champion.id, (current) => mergeSkins(current, fetchedNames));
+  };
+
+  const prefillVisible = async () => {
+    if (!ddVersion || !ddKeyMap) {
+      return;
+    }
+
+    setPrefilling(true);
+    try {
+      for (const champion of filteredChampions) {
+        await prefillChampion(champion);
+      }
+    } finally {
+      setPrefilling(false);
+    }
+  };
+
   const handleExport = () => {
     exportChampions(champions);
   };
@@ -493,6 +665,16 @@ export default function LolSkinsTracker() {
           </div>
 
           <div className="toolbar">
+            <button
+              type="button"
+              onClick={prefillVisible}
+              className="action-button"
+              disabled={!ddVersion || !ddKeyMap || prefilling}
+              title="Préremplir les skins officiels pour les champions visibles"
+            >
+              {prefilling ? "Préremplissage…" : "Préremplir (visibles)"}
+            </button>
+
             <button
               type="button"
               onClick={clearAllChecks}
@@ -595,6 +777,8 @@ export default function LolSkinsTracker() {
               }
               onAddSkin={(skinName) => addSkin(champion.id, skinName)}
               onRemoveSkin={(skinId) => removeSkin(champion.id, skinId)}
+              onPrefill={() => void prefillChampion(champion)}
+              ddragonReady={Boolean(ddVersion && ddKeyMap)}
             />
           ))}
         </ul>
@@ -617,6 +801,8 @@ type ChampionRowProps = {
   onToggleSkin: (skinId: string, checked: boolean) => void;
   onAddSkin: (name: string) => void;
   onRemoveSkin: (skinId: string) => void;
+  onPrefill: () => void;
+  ddragonReady: boolean;
 };
 
 function ChampionRow({
@@ -627,6 +813,8 @@ function ChampionRow({
   onToggleSkin,
   onAddSkin,
   onRemoveSkin,
+  onPrefill,
+  ddragonReady,
 }: ChampionRowProps) {
   const [newSkin, setNewSkin] = useState("");
   const masterRef = useRef<HTMLInputElement>(null);
@@ -670,6 +858,16 @@ function ChampionRow({
           <span className="champion-row__count">
             {checkedSkins}/{totalSkins}
           </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onPrefill}
+          className="action-button"
+          disabled={!ddragonReady}
+          title="Préremplir les skins officiels pour ce champion"
+        >
+          ↻ Préremplir
         </button>
       </div>
 

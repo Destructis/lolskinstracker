@@ -35,8 +35,8 @@ export default function ConnectedAccountPage() {
 
     try {
       const [activeResponse, playersResponse] = await Promise.all([
-        fetch("https://127.0.0.1:2999/liveclientdata/activeplayer"),
-        fetch("https://127.0.0.1:2999/liveclientdata/playerlist"),
+        fetch("/riot-local/liveclientdata/activeplayer"),
+        fetch("/riot-local/liveclientdata/playerlist"),
       ]);
 
       if (!activeResponse.ok) {
@@ -55,10 +55,11 @@ export default function ConnectedAccountPage() {
     } catch (caughtError) {
       setActivePlayer(null);
       setPlayers([]);
+      const message = caughtError instanceof Error ? caughtError.message : "";
       setError(
-        caughtError instanceof Error
-          ? caughtError.message
-          : "Impossible de joindre le client local Riot.",
+        message.includes("Failed to fetch")
+          ? "Le client League n'est pas accessible. Lance une partie et garde le client ouvert, puis réessaie."
+          : message || "Impossible de joindre le client local Riot.",
       );
     } finally {
       setLoading(false);

@@ -4,4 +4,14 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/riot-local': {
+        target: 'https://127.0.0.1:2999',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/riot-local/, ''),
+      },
+    },
+  },
 })

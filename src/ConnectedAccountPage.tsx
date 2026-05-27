@@ -25,19 +25,39 @@ type LocalPlayer = {
 
 export default function ConnectedAccountPage() {
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [status, setStatus] = useState("Clique sur le bouton pour tester le client local.");
   const [activePlayer, setActivePlayer] = useState<ActivePlayer | null>(null);
   const [players, setPlayers] = useState<LocalPlayer[]>([]);
 
   const checkLocalClient = async () => {
     setLoading(true);
-    setError("");
+    setStatus("Connexion au client local...");
 
     try {
+      const gameResponse = await fetch("/riot-local/liveclientdata/gamestats");
+
+      if (gameResponse.status === 404) {
+        setActivePlayer(null);
+        setPlayers([]);
+        setStatus("Aucune partie en cours. Ouvre une game puis réessaie.");
+        return;
+      }
+
+      if (!gameResponse.ok) {
+        throw new Error(`gamestats: ${gameResponse.status}`);
+      }
+
       const [activeResponse, playersResponse] = await Promise.all([
         fetch("/riot-local/liveclientdata/activeplayer"),
         fetch("/riot-local/liveclientdata/playerlist"),
       ]);
+
+      if (activeResponse.status === 404 || playersResponse.status === 404) {
+        setActivePlayer(null);
+        setPlayers([]);
+        setStatus("Le client est ouvert, mais aucune partie exploitable n'est détectée.");
+        return;
+      }
 
       if (!activeResponse.ok) {
         throw new Error(`activeplayer: ${activeResponse.status}`);
@@ -52,13 +72,14 @@ export default function ConnectedAccountPage() {
 
       setActivePlayer(active);
       setPlayers(list);
+      setStatus("Données du client local chargées.");
     } catch (caughtError) {
       setActivePlayer(null);
       setPlayers([]);
       const message = caughtError instanceof Error ? caughtError.message : "";
-      setError(
+      setStatus(
         message.includes("Failed to fetch")
-          ? "Le client League n'est pas accessible. Lance une partie et garde le client ouvert, puis réessaie."
+          ? "Le client League n'est pas accessible. Lance le client, puis réessaie."
           : message || "Impossible de joindre le client local Riot.",
       );
     } finally {
@@ -81,6 +102,9 @@ export default function ConnectedAccountPage() {
               Cette page lit le client League en local si une partie est en cours.
               L’API publique Riot ne fournit pas l’inventaire de skins possédés.
             </p>
+            <p className="subtitle" style={{ marginTop: 8 }}>
+              {status}
+            </p>
           </div>
 
           <div className="toolbar">
@@ -90,7 +114,7 @@ export default function ConnectedAccountPage() {
           </div>
         </header>
 
-        {error ? <div className="notice notice--error">{error}</div> : null}
+        <div className="notice">{status}</div>
 
         <section className="account-grid">
           <article className="info-card">
@@ -156,9 +180,9 @@ export default function ConnectedAccountPage() {
 
         <section className="account-footer">
           <p>
-            Si tu veux vraiment afficher les skins possédés du compte connecté, il faudra
-            brancher un backend Riot autorisé ou un flux local du client, parce que le web
-            seul ne peut pas lire cet inventaire.
+            Pour lire un compte hors partie, il faut passer par le client League local
+            avec ses endpoints internes, ou par un backend Riot autorisé avec login RSO.
+            L’API Live Client seule ne peut pas donner ces données hors game.
           </p>
         </section>
       </div>
